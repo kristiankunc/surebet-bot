@@ -13,6 +13,7 @@ import {
 	ButtonStyle,
 	ButtonInteraction,
 	TextChannel,
+	type SlashCommandOptionsOnlyBuilder,
 } from "discord.js";
 import { surebets, main, Surebet } from "./fetcher.js";
 import { ensureEnv } from "./ensure_env.js";
@@ -26,10 +27,10 @@ const TOKEN = process.env.DISCORD_TOKEN!;
 const CLIENT_ID = process.env.CLIENT_ID!;
 
 class Command {
-	builder: SlashCommandBuilder;
+	builder: SlashCommandBuilder | SlashCommandOptionsOnlyBuilder;
 	handle: (interaction: any) => void;
 
-	constructor(builder: SlashCommandBuilder, handle: (interaction: any) => void) {
+	constructor(builder: SlashCommandBuilder | SlashCommandOptionsOnlyBuilder, handle: (interaction: any) => void) {
 		this.builder = builder;
 		this.handle = handle;
 	}
@@ -38,41 +39,27 @@ class Command {
 const PAGE_SIZE = 5;
 const userPages = new Map<string, number>();
 
-const commands = [
-	new Command(
-		new SlashCommandBuilder().setName("surebets").setDescription("Replies with the list of surebets"),
-		async (interaction: ChatInputCommandInteraction<CacheType>) => {
-			await sendSurebetsPage(interaction, 0);
-		}
-	),
-];
+async function sendSurebetById(interaction: ChatInputCommandInteraction<CacheType>, id: string) {
+	const surebet = surebets.get(id);
 
-const rest = new REST({ version: "10" }).setToken(TOKEN);
-(async () => {
-	try {
-		console.log("Registering guild commands...");
-		await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: commands.map((c) => c.builder.toJSON()) });
-		console.log("Guild commands registered successfully.");
-	} catch (error) {
-		console.error(error);
+	if (!surebet) {
+		await interaction.reply({ content: `No surebet found with ID: ${id}`, ephemeral: true });
+		return;
 	}
-})();
 
-client.on(Events.InteractionCreate, async (interaction) => {
-	if (interaction.isChatInputCommand()) {
-		const command = commands.find((c) => c.builder.name === interaction.commandName);
-		if (!command) return;
+	const embed = new EmbedBuilder()
+		.setTitle(surebet.eventName)
+		.setColor(0x00ae86)
+		.addFields(
+			{ name: "Profit", value: `\`${surebet.profitPercent}%\``, inline: true },
+			{ name: "Time", value: `<t:${Math.floor(surebet.time.getTime() / 1000)}:F>`, inline: true },
+			{ name: "Bookers", value: surebet.bookers.join(", "), inline: false },
+			{ name: "URL", value: surebet.generateCalculatorUrl(), inline: false }
+		)
+		.setTimestamp();
 
-		try {
-			await command.handle(interaction);
-		} catch (err) {
-			console.error("Error handling command:", err);
-			await interaction.reply({ content: "There was an error executing this command.", ephemeral: true });
-		}
-	} else if (interaction.isButton()) {
-		await handlePagination(interaction);
-	}
-});
+	await interaction.reply({ embeds: [embed] });
+}
 
 function createSurebetPage(page: number) {
 	const maxPage = Math.floor((surebets.size - 1) / PAGE_SIZE);
@@ -91,11 +78,10 @@ function createSurebetPage(page: number) {
 			name: surebet.eventName,
 			value: `Profit: \`${surebet.profitPercent}%\`\nTime: <t:${Math.floor(surebet.time.getTime() / 1000)}:F>\nBookers: ${surebet.bookers.join(
 				", "
-			)}\nUrl: ${surebet.generateCalculatorUrl()}`,
+			)}\nId: \`${surebet.id}\`\nUrl: ${surebet.generateCalculatorUrl()}`,
 		});
 	}
 
-	// Create navigation buttons
 	const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
 		new ButtonBuilder()
 			.setCustomId("<<")
@@ -212,6 +198,52 @@ function chunkArray<T>(array: T[], chunkSize: number): T[][] {
 	}
 	return results;
 }
+
+const commands = [
+	new Command(
+		new SlashCommandBuilder().setName("surebets").setDescription("Replies with the list of surebets"),
+		async (interaction: ChatInputCommandInteraction<CacheType>) => {
+			await sendSurebetsPage(interaction, 0);
+		}
+	),
+	new Command(
+		new SlashCommandBuilder()
+			.setName("surebet")
+			.setDescription("Replies with a specific surebet")
+			.addStringOption((option) => option.setName("id").setDescription("The ID of the surebet").setRequired(true)),
+		async (interaction: ChatInputCommandInteraction<CacheType>) => {
+			const id = interaction.options.getString("id", true);
+			await sendSurebetById(interaction, id);
+		}
+	),
+];
+
+const rest = new REST({ version: "10" }).setToken(TOKEN);
+(async () => {
+	try {
+		console.log("Registering guild commands...");
+		await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: commands.map((c) => c.builder.toJSON()) });
+		console.log("Guild commands registered successfully.");
+	} catch (error) {
+		console.error(error);
+	}
+})();
+
+client.on(Events.InteractionCreate, async (interaction) => {
+	if (interaction.isChatInputCommand()) {
+		const command = commands.find((c) => c.builder.name === interaction.commandName);
+		if (!command) return;
+
+		try {
+			await command.handle(interaction);
+		} catch (err) {
+			console.error("Error handling command:", err);
+			await interaction.reply({ content: "There was an error executing this command.", ephemeral: true });
+		}
+	} else if (interaction.isButton()) {
+		await handlePagination(interaction);
+	}
+});
 
 client.login(TOKEN);
 main();

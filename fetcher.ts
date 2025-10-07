@@ -101,7 +101,8 @@ async function loadSurebets(page: Page) {
 }
 
 export async function main() {
-	const browser = await puppeteer.launch({ headless: false });
+	//const browser = await puppeteer.launch({ headless: false });
+	const browser = await puppeteer.launch();
 	const page = await browser.newPage();
 
 	loadCookies(browser);
@@ -127,4 +128,6 @@ export async function main() {
 	await browser.close();
 }
 
-//main();
+if (require.main === module) {
+	main();
+}
