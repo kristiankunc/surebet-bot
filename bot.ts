@@ -1,0 +1,171 @@
+import {
+	Client,
+	Events,
+	GatewayIntentBits,
+	REST,
+	Routes,
+	SlashCommandBuilder,
+	ChatInputCommandInteraction,
+	type CacheType,
+	EmbedBuilder,
+	ActionRowBuilder,
+	ButtonBuilder,
+	ButtonStyle,
+	ButtonInteraction,
+} from "discord.js";
+import { surebets, main } from "./fetcher.js";
+
+const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+
+const GUILD_ID = process.env.GUILD_ID!;
+const TOKEN = process.env.DISCORD_TOKEN!;
+const CLIENT_ID = process.env.CLIENT_ID!;
+
+class Command {
+	builder: SlashCommandBuilder;
+	handle: (interaction: any) => void;
+
+	constructor(builder: SlashCommandBuilder, handle: (interaction: any) => void) {
+		this.builder = builder;
+		this.handle = handle;
+	}
+}
+
+const PAGE_SIZE = 5;
+const userPages = new Map<string, number>();
+
+const commands = [
+	new Command(
+		new SlashCommandBuilder().setName("surebets").setDescription("Replies with the list of surebets"),
+		async (interaction: ChatInputCommandInteraction<CacheType>) => {
+			await sendSurebetsPage(interaction, 0);
+		}
+	),
+];
+
+const rest = new REST({ version: "10" }).setToken(TOKEN);
+(async () => {
+	try {
+		console.log("Registering guild commands...");
+		await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: commands.map((c) => c.builder.toJSON()) });
+		console.log("Guild commands registered successfully.");
+	} catch (error) {
+		console.error(error);
+	}
+})();
+
+client.on(Events.InteractionCreate, async (interaction) => {
+	if (interaction.isChatInputCommand()) {
+		const command = commands.find((c) => c.builder.name === interaction.commandName);
+		if (!command) return;
+
+		try {
+			await command.handle(interaction);
+		} catch (err) {
+			console.error("Error handling command:", err);
+			await interaction.reply({ content: "There was an error executing this command.", ephemeral: true });
+		}
+	} else if (interaction.isButton()) {
+		await handlePagination(interaction);
+	}
+});
+
+function createSurebetPage(page: number) {
+	const maxPage = Math.floor((surebets.size - 1) / PAGE_SIZE);
+
+	const topSurebets = Array.from(surebets.values())
+		.sort((a, b) => b.profitPercent - a.profitPercent)
+		.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
+	const embed = new EmbedBuilder()
+		.setTitle(`Surebets — Page ${page + 1}`)
+		.setColor(0x00ae86)
+		.setTimestamp();
+
+	for (const surebet of topSurebets) {
+		embed.addFields({
+			name: surebet.eventName,
+			value: `Profit: ${surebet.profitPercent}%\nTime: <t:${Math.floor(surebet.time.getTime() / 1000)}:F>\nBookers: ${surebet.bookers.join(
+				", "
+			)}\nUrl: ${surebet.generateCalculatorUrl()}`,
+		});
+	}
+
+	// Create navigation buttons
+	const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+		new ButtonBuilder()
+			.setCustomId("<<")
+			.setLabel("<<")
+			.setStyle(ButtonStyle.Primary)
+			.setDisabled(page === 0),
+		new ButtonBuilder()
+			.setCustomId("<")
+			.setLabel("<")
+			.setStyle(ButtonStyle.Primary)
+			.setDisabled(page === 0),
+		new ButtonBuilder()
+			.setCustomId(">")
+			.setLabel(">")
+			.setStyle(ButtonStyle.Primary)
+			.setDisabled(page >= maxPage),
+		new ButtonBuilder()
+			.setCustomId(">>")
+			.setLabel(">>")
+			.setStyle(ButtonStyle.Primary)
+			.setDisabled(page >= maxPage)
+	);
+
+	return { embed, row };
+}
+
+async function sendSurebetsPage(interaction: ChatInputCommandInteraction<CacheType>, page: number) {
+	if (surebets.size === 0) {
+		await interaction.reply("No surebets available at the moment.");
+		return;
+	}
+
+	const { embed, row } = createSurebetPage(page);
+
+	await interaction.reply({ embeds: [embed], components: [row] });
+	const message = await interaction.fetchReply();
+	userPages.set(message.id, page);
+}
+
+async function handlePagination(interaction: ButtonInteraction) {
+	const messageId = interaction.message.id;
+	const currentPage = userPages.get(messageId) ?? 0;
+	const maxPage = Math.floor((surebets.size - 1) / PAGE_SIZE);
+	let newPage = currentPage;
+
+	switch (interaction.customId) {
+		case "<<":
+			newPage = 0;
+			break;
+		case "<":
+			newPage = Math.max(0, currentPage - 1);
+			break;
+		case ">":
+			newPage = Math.min(maxPage, currentPage + 1);
+			break;
+		case ">>":
+			newPage = maxPage;
+			break;
+	}
+
+	if (newPage === currentPage) {
+		await interaction.deferUpdate();
+		return;
+	}
+
+	const { embed, row } = createSurebetPage(newPage);
+
+	userPages.set(messageId, newPage);
+	await interaction.update({ embeds: [embed], components: [row] });
+}
+
+client.login(TOKEN);
+main();
+setInterval(() => {
+	console.log("Fetching new surebets...");
+	main();
+}, 1000 * 60 * 5);
