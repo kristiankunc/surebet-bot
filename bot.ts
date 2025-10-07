@@ -12,8 +12,12 @@ import {
 	ButtonBuilder,
 	ButtonStyle,
 	ButtonInteraction,
+	TextChannel,
 } from "discord.js";
-import { surebets, main } from "./fetcher.js";
+import { surebets, main, Surebet } from "./fetcher.js";
+import { ensureEnv } from "./ensure_env.js";
+
+await ensureEnv();
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
@@ -85,7 +89,7 @@ function createSurebetPage(page: number) {
 	for (const surebet of topSurebets) {
 		embed.addFields({
 			name: surebet.eventName,
-			value: `Profit: ${surebet.profitPercent}%\nTime: <t:${Math.floor(surebet.time.getTime() / 1000)}:F>\nBookers: ${surebet.bookers.join(
+			value: `Profit: \`${surebet.profitPercent}%\`\nTime: <t:${Math.floor(surebet.time.getTime() / 1000)}:F>\nBookers: ${surebet.bookers.join(
 				", "
 			)}\nUrl: ${surebet.generateCalculatorUrl()}`,
 		});
@@ -161,6 +165,52 @@ async function handlePagination(interaction: ButtonInteraction) {
 
 	userPages.set(messageId, newPage);
 	await interaction.update({ embeds: [embed], components: [row] });
+}
+
+export async function alertSurebets(surebets: Surebet[]) {
+	const ALERT_CHANNEL_ID = process.env.ALERT_CHANNEL_ID!;
+	const channel = await client.channels.fetch(ALERT_CHANNEL_ID);
+
+	if (!channel || !channel.isTextBased()) {
+		console.error("Alert channel not found or is not text-based.");
+		return;
+	}
+
+	const textChannel = channel as TextChannel;
+
+	if (surebets.length === 0) return;
+
+	const chunkedSurebets = chunkArray(surebets, 4);
+
+	for (const surebetChunk of chunkedSurebets) {
+		const embed = new EmbedBuilder().setTitle("New Surebet Alerts!").setColor(0x00ff00).setTimestamp();
+
+		let description = "";
+		for (const surebet of surebetChunk) {
+			const surebetInfo = `**${surebet.eventName} - (${surebet.bookers.join(", ")}) **
+			Profit: \`${surebet.profitPercent}%\`
+			ID: \`${surebet.id}\`
+			URL: ${surebet.generateCalculatorUrl()}\n\n`;
+
+			if (description.length + surebetInfo.length > 4096) {
+				console.warn("Surebet info exceeds embed limit, skipping...");
+				continue;
+			}
+			description += surebetInfo;
+		}
+
+		embed.setDescription(description);
+
+		await textChannel.send({ embeds: [embed] });
+	}
+}
+
+function chunkArray<T>(array: T[], chunkSize: number): T[][] {
+	const results: T[][] = [];
+	for (let i = 0; i < array.length; i += chunkSize) {
+		results.push(array.slice(i, i + chunkSize));
+	}
+	return results;
 }
 
 client.login(TOKEN);

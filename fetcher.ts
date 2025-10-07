@@ -1,12 +1,13 @@
 import puppeteer, { Browser, ElementHandle, Page } from "puppeteer";
 
 import fs from "fs/promises";
+import { alertSurebets } from "./bot";
 
 const COOKIES_FILE = "data/cookies.json";
 
 export const surebets: Map<string, Surebet> = new Map();
 
-class Surebet {
+export class Surebet {
 	id: string;
 	profitPercent: number;
 	time: Date;
@@ -100,24 +101,26 @@ async function loadSurebets(page: Page) {
 }
 
 export async function main() {
-	if (!process.env.EMAIL || !process.env.PASSWORD) {
-		throw new Error("Missing EMAIL or PASSWORD in environment variables");
-	}
-
 	const browser = await puppeteer.launch({ headless: false });
 	const page = await browser.newPage();
 
 	loadCookies(browser);
 	if (!(await isLoggedIn(page))) {
-		await login(page, process.env.EMAIL, process.env.PASSWORD);
+		await login(page, process.env.EMAIL!, process.env.PASSWORD!);
 		await dumpCookies(browser);
 	}
 
 	const fetchedSurebets = await loadSurebets(page);
+	const surbetsToAlert = [];
 
 	for (const surebet of fetchedSurebets) {
 		surebets.set(surebet.id, surebet);
+		if (surebet.profitPercent >= Number(process.env.ALERT_THRESHOLD)!) {
+			surbetsToAlert.push(surebet);
+		}
 	}
+
+	await alertSurebets(surbetsToAlert);
 
 	console.log(`Fetched ${surebets.size} surebets:`);
 
