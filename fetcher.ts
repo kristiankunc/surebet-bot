@@ -2,6 +2,7 @@ import puppeteer, { Browser, ElementHandle, Page } from "puppeteer";
 
 import fs from "fs/promises";
 import { alertSurebets } from "./bot";
+import path from "path";
 
 const COOKIES_FILE = "data/cookies.json";
 
@@ -28,8 +29,16 @@ export class Surebet {
 }
 
 async function dumpCookies(browser: Browser) {
-	const cookies = await browser.cookies();
-	await fs.writeFile(COOKIES_FILE, JSON.stringify(cookies, null, 2));
+	try {
+		const cookies = await browser.cookies();
+		const dir = path.dirname(COOKIES_FILE);
+
+		await fs.mkdir(dir, { recursive: true });
+
+		await fs.writeFile(COOKIES_FILE, JSON.stringify(cookies, null, 2));
+	} catch (err) {
+		console.warn("Could not write cookies file:", (err as Error).message);
+	}
 }
 
 async function loadCookies(browser: Browser) {
@@ -102,7 +111,10 @@ async function loadSurebets(page: Page) {
 
 export async function main() {
 	//const browser = await puppeteer.launch({ headless: false });
-	const browser = await puppeteer.launch();
+	const browser = await puppeteer.launch({
+		executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+		args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+	});
 	const page = await browser.newPage();
 
 	loadCookies(browser);
