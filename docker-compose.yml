@@ -1,0 +1,14 @@
+services:
+  surebets:
+    image: ghcr.io/kristiankunc/surebet-bot:latest
+    container_name: surebets
+    restart: unless-stopped
+    env_file:
+      - .env
+      - stack.env
+
+    volumes:
+      - surebets-data:/usr/src/app/data
+
+volumes:
+  surebets-data:
