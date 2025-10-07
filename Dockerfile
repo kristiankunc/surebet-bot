@@ -22,6 +22,8 @@ RUN cd /temp/prod && bun install --frozen-lockfile --production
 FROM base AS prerelease
 COPY --from=install /temp/dev/node_modules node_modules
 COPY . .
+RUN mkdir -p /usr/src/app/data \
+    && chown -R bun:bun /usr/src/app/data
 
 FROM base AS release
 USER bun
