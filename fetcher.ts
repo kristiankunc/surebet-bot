@@ -133,6 +133,16 @@ export async function main() {
 		}
 	}
 
+	for (const id of surebets.keys()) {
+		const surebet = surebets.get(id);
+
+		// check if time is in the past + 6 hours
+		if (surebet!.time < new Date(Date.now() - 6 * 60 * 60 * 1000)) surebets.delete(id);
+
+		const res = await fetch(surebet!.generateCalculatorUrl());
+		if (res.status === 404) surebets.delete(id);
+	}
+
 	await alertSurebets(surbetsToAlert);
 
 	console.log(`Fetched ${surebets.size} surebets:`);
